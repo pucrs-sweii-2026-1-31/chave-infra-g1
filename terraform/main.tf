@@ -17,46 +17,27 @@ provider "aws" {
   s3_use_path_style           = true
 
   endpoints {
-    s3         = var.endpoint
-    rds        = var.endpoint
     apigateway = var.endpoint
+    s3         = var.endpoint
     sts        = var.endpoint
   }
 }
 
-# ─── S3 ───────────────────────────────────────────────────────────────────────
-
-resource "aws_s3_bucket" "media" {
-  bucket = "chave-media"
+resource "aws_s3_bucket" "artifacts" {
+  bucket        = var.artifact_bucket
+  force_destroy = true
 }
 
-resource "aws_s3_bucket_versioning" "media" {
-  bucket = aws_s3_bucket.media.id
+resource "aws_s3_bucket_versioning" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-# ─── RDS ──────────────────────────────────────────────────────────────────────
-
-resource "aws_db_instance" "auth" {
-  identifier          = "chave-auth-db"
-  engine              = "postgres"
-  engine_version      = "15.3"
-  instance_class      = "db.t3.micro"
-  username            = var.db_user
-  password            = var.db_password
-  db_name             = var.db_name
-  allocated_storage   = 20
-  multi_az            = false
-  publicly_accessible = false
-  skip_final_snapshot = true
-}
-
-# ─── API Gateway ──────────────────────────────────────────────────────────────
-
 resource "aws_api_gateway_rest_api" "chave" {
-  name = "chave-api"
+  name = var.api_name
 }
 
 resource "aws_api_gateway_resource" "auth" {
@@ -65,116 +46,82 @@ resource "aws_api_gateway_resource" "auth" {
   path_part   = "auth"
 }
 
-# POST /auth/login
-
-resource "aws_api_gateway_resource" "auth_login" {
+resource "aws_api_gateway_resource" "auth_proxy" {
   rest_api_id = aws_api_gateway_rest_api.chave.id
   parent_id   = aws_api_gateway_resource.auth.id
-  path_part   = "login"
+  path_part   = "{proxy+}"
 }
 
-resource "aws_api_gateway_method" "auth_login" {
+resource "aws_api_gateway_method" "auth_root" {
   rest_api_id   = aws_api_gateway_rest_api.chave.id
-  resource_id   = aws_api_gateway_resource.auth_login.id
-  http_method   = "POST"
+  resource_id   = aws_api_gateway_resource.auth.id
+  http_method   = "ANY"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "auth_login" {
-  rest_api_id             = aws_api_gateway_rest_api.chave.id
-  resource_id             = aws_api_gateway_resource.auth_login.id
-  http_method             = aws_api_gateway_method.auth_login.http_method
-  type                    = "HTTP_PROXY"
-  integration_http_method = "POST"
-  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/login"
-}
-
-# POST /auth/refresh
-
-resource "aws_api_gateway_resource" "auth_refresh" {
-  rest_api_id = aws_api_gateway_rest_api.chave.id
-  parent_id   = aws_api_gateway_resource.auth.id
-  path_part   = "refresh"
-}
-
-resource "aws_api_gateway_method" "auth_refresh" {
+resource "aws_api_gateway_method" "auth_proxy" {
   rest_api_id   = aws_api_gateway_rest_api.chave.id
-  resource_id   = aws_api_gateway_resource.auth_refresh.id
-  http_method   = "POST"
+  resource_id   = aws_api_gateway_resource.auth_proxy.id
+  http_method   = "ANY"
   authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.proxy" = true
+  }
 }
 
-resource "aws_api_gateway_integration" "auth_refresh" {
+resource "aws_api_gateway_integration" "auth_root" {
   rest_api_id             = aws_api_gateway_rest_api.chave.id
-  resource_id             = aws_api_gateway_resource.auth_refresh.id
-  http_method             = aws_api_gateway_method.auth_refresh.http_method
+  resource_id             = aws_api_gateway_resource.auth.id
+  http_method             = aws_api_gateway_method.auth_root.http_method
   type                    = "HTTP_PROXY"
-  integration_http_method = "POST"
-  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/refresh"
+  integration_http_method = "ANY"
+  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/auth"
 }
 
-# POST /auth/logout
-
-resource "aws_api_gateway_resource" "auth_logout" {
-  rest_api_id = aws_api_gateway_rest_api.chave.id
-  parent_id   = aws_api_gateway_resource.auth.id
-  path_part   = "logout"
-}
-
-resource "aws_api_gateway_method" "auth_logout" {
-  rest_api_id   = aws_api_gateway_rest_api.chave.id
-  resource_id   = aws_api_gateway_resource.auth_logout.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "auth_logout" {
+resource "aws_api_gateway_integration" "auth_proxy" {
   rest_api_id             = aws_api_gateway_rest_api.chave.id
-  resource_id             = aws_api_gateway_resource.auth_logout.id
-  http_method             = aws_api_gateway_method.auth_logout.http_method
+  resource_id             = aws_api_gateway_resource.auth_proxy.id
+  http_method             = aws_api_gateway_method.auth_proxy.http_method
   type                    = "HTTP_PROXY"
-  integration_http_method = "POST"
-  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/logout"
+  integration_http_method = "ANY"
+  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/auth/{proxy}"
+
+  request_parameters = {
+    "integration.request.path.proxy" = "method.request.path.proxy"
+  }
 }
-
-# GET /auth/me
-
-resource "aws_api_gateway_resource" "auth_me" {
-  rest_api_id = aws_api_gateway_rest_api.chave.id
-  parent_id   = aws_api_gateway_resource.auth.id
-  path_part   = "me"
-}
-
-resource "aws_api_gateway_method" "auth_me" {
-  rest_api_id   = aws_api_gateway_rest_api.chave.id
-  resource_id   = aws_api_gateway_resource.auth_me.id
-  http_method   = "GET"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "auth_me" {
-  rest_api_id             = aws_api_gateway_rest_api.chave.id
-  resource_id             = aws_api_gateway_resource.auth_me.id
-  http_method             = aws_api_gateway_method.auth_me.http_method
-  type                    = "HTTP_PROXY"
-  integration_http_method = "GET"
-  uri                     = "http://${var.ms_auth_host}:${var.ms_auth_port}/me"
-}
-
-# ─── Deployment ───────────────────────────────────────────────────────────────
 
 resource "aws_api_gateway_deployment" "chave" {
   rest_api_id = aws_api_gateway_rest_api.chave.id
-  stage_name  = "v1"
+
+  triggers = {
+    redeploy = sha1(jsonencode([
+      aws_api_gateway_integration.auth_root.id,
+      aws_api_gateway_integration.auth_proxy.id,
+    ]))
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   depends_on = [
-    aws_api_gateway_integration.auth_login,
-    aws_api_gateway_integration.auth_refresh,
-    aws_api_gateway_integration.auth_logout,
-    aws_api_gateway_integration.auth_me,
+    aws_api_gateway_integration.auth_root,
+    aws_api_gateway_integration.auth_proxy,
   ]
 }
 
+resource "aws_api_gateway_stage" "local" {
+  deployment_id = aws_api_gateway_deployment.chave.id
+  rest_api_id   = aws_api_gateway_rest_api.chave.id
+  stage_name    = var.api_stage
+}
+
+output "artifact_bucket" {
+  value = aws_s3_bucket.artifacts.bucket
+}
+
 output "gateway_url" {
-  value = "${var.endpoint}/restapis/${aws_api_gateway_rest_api.chave.id}/v1/_user_request_"
+  value = "${var.endpoint}/restapis/${aws_api_gateway_rest_api.chave.id}/${var.api_stage}/_user_request_"
 }

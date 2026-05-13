@@ -6,17 +6,16 @@ variable "region" {
   default = "us-east-1"
 }
 
-variable "db_name" {
-  default = "chave_auth"
+variable "artifact_bucket" {
+  default = "chave-artifacts-local"
 }
 
-variable "db_user" {
-  default = "chave"
+variable "api_name" {
+  default = "chave-local-api"
 }
 
-variable "db_password" {
-  default   = "chave_secret"
-  sensitive = true
+variable "api_stage" {
+  default = "v1"
 }
 
 variable "ms_auth_host" {
