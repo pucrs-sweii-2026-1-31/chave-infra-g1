@@ -22,6 +22,14 @@ env_value() {
     return
   fi
 
+  if [ -f .env.generated ]; then
+    file_value="$(grep -E "^${key}=" .env.generated | tail -n 1 | cut -d= -f2- || true)"
+    if [ -n "$file_value" ]; then
+      printf '%s\n' "$file_value"
+      return
+    fi
+  fi
+
   if [ -f .env ]; then
     file_value="$(grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- || true)"
     if [ -n "$file_value" ]; then
@@ -87,6 +95,10 @@ ministack_url="$(env_value MINISTACK_URL "http://localhost:${ministack_port}")"
 
 check_url "Backend health" "${auth_api_url}/health"
 check_url "Swagger" "${auth_api_url}/docs"
+case "$auth_api_url" in
+  *"/restapis/"*"/_user_request_"*) info "Auth API is routed through Ministack API Gateway." ;;
+  *) info "Auth API is using a direct URL: $auth_api_url" ;;
+esac
 check_url "Auth MFE remote entry" "${mfe_auth_url}/assets/remoteEntry.js"
 check_url "Shell" "$shell_url"
 check_url "Ministack health" "${ministack_url}/_localstack/health"

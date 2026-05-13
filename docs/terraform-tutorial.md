@@ -3,8 +3,9 @@
 This document explains how to run `chave-infra` with the project's local
 Terraform setup.
 
-In this repository, Terraform is optional. Docker Compose starts the application
-containers, while Terraform provisions AWS-like resources inside Ministack.
+In this repository, Terraform provisions the local AWS-like API Gateway route
+inside Ministack. `make setup` runs that provisioning before building the auth
+MFE so browser auth traffic uses the generated gateway URL.
 
 ## What Terraform Does
 
@@ -13,8 +14,8 @@ Terraform creates local resources in Ministack:
 - S3 bucket for artifacts;
 - bucket versioning;
 - API Gateway REST API;
-- `/auth` route;
-- `/auth/{proxy+}` route;
+- root proxy route;
+- `/auth` proxy route;
 - HTTP proxy integration pointing to `chave-ms-auth:3001`;
 - `v1` stage.
 
@@ -36,9 +37,9 @@ Expected structure:
 ```text
 project/
 |-- chave-infra-g1/
-|-- chave-ms-auth/
-|-- chave-mfe-auth/
-`-- chave-shell/
+|-- chave-ms-auth-g1/
+|-- chave-mfe-auth-g1/
+`-- chave-shell-g1/
 ```
 
 You do not need to install Terraform on your machine. The project uses the
@@ -69,15 +70,16 @@ Run:
 make setup
 ```
 
-This command starts the main services:
+This command starts the core services, provisions the gateway, and starts the
+frontend services:
 
 - `postgres`;
 - `ministack`;
 - `chave-ms-auth`;
 - `chave-mfe-auth`;
 - `chave-shell`.
-
-In this project, `make setup` does not run Terraform automatically.
+ 
+It also writes the generated browser-facing gateway URL to `.env.generated`.
 
 ## Step 3: Verify The Stack
 
@@ -89,13 +91,13 @@ make verify
 
 This command checks:
 
-- backend: `http://localhost:3001/health`;
-- Swagger: `http://localhost:3001/docs`;
+- backend through generated `AUTH_API_PUBLIC_URL`;
+- Swagger through generated `AUTH_API_PUBLIC_URL`;
 - auth MFE remote entry: `http://localhost:4001/assets/remoteEntry.js`;
 - shell: `http://localhost:3000`;
 - Ministack: `http://localhost:4566/_localstack/health`.
 
-## Step 4: Initialize Terraform
+## Step 4: Initialize Terraform Manually
 
 Run:
 
@@ -124,9 +126,9 @@ created. The expected summary looks like this:
 Plan: 11 to add, 0 to change, 0 to destroy.
 ```
 
-## Step 6: Apply Terraform
+## Step 6: Apply Terraform Manually
 
-To create the resources in Ministack:
+To create the resources in Ministack outside the normal `make setup` flow:
 
 ```bash
 make provision
@@ -148,7 +150,7 @@ At the end, Terraform should print outputs like:
 
 ```text
 artifact_bucket = "chave-artifacts-local"
-gateway_url = "http://ministack:4566/restapis/<api-id>/v1/_user_request_"
+gateway_url = "http://localhost:4566/restapis/<api-id>/v1/_user_request_"
 ```
 
 ## Step 7: Confirm State Convergence
@@ -179,15 +181,8 @@ To read only the gateway URL:
 docker compose --profile provision run --rm --entrypoint terraform infra-provisioner output -raw gateway_url
 ```
 
-The output uses `ministack` because that is the internal Docker network URL. To
-access it from the host, replace `ministack` with `localhost`.
-
-Example:
-
-```text
-Internal: http://ministack:4566/restapis/<api-id>/v1/_user_request_
-Host:     http://localhost:4566/restapis/<api-id>/v1/_user_request_
-```
+The output uses `localhost` because `TF_VAR_public_endpoint` is configured for
+browser/host access.
 
 ## Step 9: Test The API Gateway
 
@@ -195,7 +190,7 @@ After starting the application and applying Terraform, test a route through API
 Gateway:
 
 ```bash
-GATEWAY_URL="$(docker compose --profile provision run --rm --entrypoint terraform infra-provisioner output -raw gateway_url | tail -n 1 | sed 's|ministack|localhost|')"
+GATEWAY_URL="$(docker compose --env-file .env --env-file .env.generated --profile provision run --rm --entrypoint terraform infra-provisioner output -raw gateway_url | tail -n 1)"
 curl -i "$GATEWAY_URL/auth/me"
 ```
 
@@ -217,29 +212,17 @@ curl -i \
 
 ## Use The Gateway In The Frontend
 
-By default, the auth MFE calls the API directly:
-
-```text
-http://localhost:3001
-```
-
-If you want the frontend to use API Gateway, first apply Terraform and copy the
-gateway URL using `localhost`:
-
-```text
-http://localhost:4566/restapis/<api-id>/v1/_user_request_
-```
-
-Then edit `.env`:
+By default, `make setup` applies Terraform and writes the generated gateway URL
+to `.env.generated`:
 
 ```env
 AUTH_API_PUBLIC_URL=http://localhost:4566/restapis/<api-id>/v1/_user_request_
 ```
 
-Rebuild/start the services again:
+Then it rebuilds/starts the frontend services with that URL:
 
 ```bash
-make up
+docker compose --env-file .env --env-file .env.generated up -d --build chave-mfe-auth chave-shell
 ```
 
 ## Useful Commands
@@ -260,7 +243,7 @@ make provision
 # Print Terraform outputs
 docker compose --profile provision run --rm --entrypoint terraform infra-provisioner output
 
-# Validate direct stack endpoints
+# Validate stack endpoints through the generated gateway URL
 make verify
 ```
 
@@ -299,9 +282,9 @@ Confirm that the sibling repositories exist in the same parent directory:
 ```text
 project/
 |-- chave-infra-g1/
-|-- chave-ms-auth/
-|-- chave-mfe-auth/
-`-- chave-shell/
+|-- chave-ms-auth-g1/
+|-- chave-mfe-auth-g1/
+`-- chave-shell-g1/
 ```
 
 ### Port Already In Use

@@ -161,8 +161,8 @@ Default local URLs:
 ```text
 Shell:     http://localhost:3000
 Auth MFE:  http://localhost:4001
-Auth API:  http://localhost:3001
-Swagger:   http://localhost:3001/docs
+Auth API:  generated in chave-infra-g1/.env.generated through Ministack API Gateway
+Swagger:   ${AUTH_API_PUBLIC_URL}/docs
 Ministack: http://localhost:4566
 ```
 
@@ -256,4 +256,3 @@ The system is ready when:
 - Unit/integration/frontend checks pass.
 - CI workflows are present and realistic.
 - Documentation and AI evidence exist in `grupo-1`.
-

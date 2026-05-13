@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: chave-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-chave_auth}
       POSTGRES_USER: ${DB_USER:-chave}
@@ -20,7 +19,6 @@ services:
 
   ministack:
     image: ${MINISTACK_IMAGE:-ministackorg/ministack}
-    container_name: chave-ministack
     ports:
       - "${MINISTACK_PORT:-4566}:4566"
     environment:
@@ -43,9 +41,8 @@ services:
 
   chave-ms-auth:
     build:
-      context: ../chave-ms-auth
+      context: ../chave-ms-auth-g1
       dockerfile: Dockerfile
-    container_name: chave-ms-auth
     ports:
       - "${MS_AUTH_PORT:-3001}:3001"
     environment:
@@ -112,17 +109,16 @@ services:
 
   chave-mfe-auth:
     build:
-      context: ../chave-mfe-auth
+      context: ../chave-mfe-auth-g1
       dockerfile: Dockerfile
       args:
-        VITE_AUTH_API_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
-        VITE_MS_AUTH_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
-    container_name: chave-mfe-auth
+        VITE_AUTH_API_URL: /api
+        VITE_MS_AUTH_URL: /api
     ports:
       - "${MFE_AUTH_PORT:-4001}:4001"
     environment:
-      VITE_AUTH_API_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
-      VITE_MS_AUTH_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
+      AUTH_API_PROXY_URL: ${AUTH_API_INTERNAL_URL:-http://chave-ms-auth:3001}
+      NGINX_ENVSUBST_FILTER: AUTH_API_PROXY_URL
     depends_on:
       chave-ms-auth:
         condition: service_started
@@ -130,17 +126,18 @@ services:
 
   chave-shell:
     build:
-      context: ../chave-shell
+      context: ../chave-shell-g1
       dockerfile: Dockerfile
       args:
         MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
         VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
-    container_name: chave-shell
     ports:
       - "${SHELL_PORT:-3000}:3000"
     environment:
       MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
       VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
+      AUTH_API_PROXY_URL: ${AUTH_API_INTERNAL_URL:-http://chave-ms-auth:3001}
+      NGINX_ENVSUBST_FILTER: AUTH_API_PROXY_URL
     depends_on:
       chave-mfe-auth:
         condition: service_started
@@ -148,7 +145,6 @@ services:
 
   infra-provisioner:
     image: hashicorp/terraform:1.8
-    container_name: chave-infra-provisioner
     profiles:
       - provision
       - infra-provisioner
@@ -161,6 +157,7 @@ services:
       TF_VAR_artifact_bucket: ${TF_VAR_ARTIFACT_BUCKET:-chave-artifacts-local}
       TF_VAR_ms_auth_host: chave-ms-auth
       TF_VAR_ms_auth_port: 3001
+      TF_VAR_public_endpoint: http://localhost:${MINISTACK_PORT:-4566}
     entrypoint: ["/bin/sh", "-c"]
     command: ["terraform init && terraform apply -auto-approve"]
     depends_on:

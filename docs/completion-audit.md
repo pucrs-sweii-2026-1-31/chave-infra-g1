@@ -8,13 +8,13 @@ Transform `chave-infra` into the local orchestration and provisioning repository
 
 Concrete success criteria:
 
-- Docker Compose defines and wires PostgreSQL, Ministack, auth backend, auth MFE, shell, and optional Terraform provisioning.
+- Docker Compose defines and wires PostgreSQL, Ministack, auth backend, auth MFE, shell, and Terraform gateway provisioning.
 - Configuration is environment-variable driven, including alternate host ports.
 - The backend receives database, JWT/token, CORS, reset URL, seed admin, and Ministack variables.
-- Frontend containers receive host-accessible backend and remote-entry URLs at build/runtime.
+- Frontend containers receive the generated Ministack API Gateway URL and remote-entry URLs at build/runtime.
 - Terraform remains minimal and provisions local AWS-compatible P1 resources.
 - Makefile provides setup, lifecycle, log, reset, provisioning, and verification targets.
-- README explains setup, URLs, alternate ports, Ministack, and optional provisioning.
+- README explains setup, URLs, alternate ports, Ministack, and gateway provisioning.
 - Acceptance commands can verify the stack once sibling app repositories provide the required containers and endpoints.
 
 ## Prompt-To-Artifact Checklist
@@ -28,7 +28,7 @@ Concrete success criteria:
 | Compose defines `chave-ms-auth` | `docker-compose.yml` service `chave-ms-auth`; `docker compose config --services` includes it. | Done |
 | Compose defines `chave-mfe-auth` | `docker-compose.yml` service `chave-mfe-auth`; `docker compose config --services` includes it. | Done |
 | Compose defines `chave-shell` | `docker-compose.yml` service `chave-shell`; `docker compose config --services` includes it. | Done |
-| Optional `infra-provisioner` profile exists | `docker-compose.yml` service `infra-provisioner` has `provision` and `infra-provisioner` profiles; `docker compose --profile provision config --services` includes it. | Done |
+| `infra-provisioner` profile exists | `docker-compose.yml` service `infra-provisioner` has `provision` and `infra-provisioner` profiles; `docker compose --profile provision config --services` includes it. | Done |
 | Backend waits for PostgreSQL and Ministack health | `chave-ms-auth.depends_on` uses `service_healthy` for `postgres` and `ministack`. | Done |
 | MFE waits for backend start | `chave-mfe-auth.depends_on` waits for `chave-ms-auth` with `service_started`. | Done |
 | Shell waits for MFE start | `chave-shell.depends_on` waits for `chave-mfe-auth` start. | Done |
@@ -51,11 +51,11 @@ Concrete success criteria:
 | Backend receives seed admin credentials | `docker-compose.yml` passes `SEED_ADMIN_*`. | Done |
 | Backend receives Ministack endpoint variables | `docker-compose.yml` passes `AWS_ENDPOINT`, `AWS_ENDPOINT_URL`, and `LOCALSTACK_ENDPOINT` pointing to `http://ministack:4566`. | Done |
 | Backend runs migrations and seed before app start | `chave-ms-auth.command` runs Prisma migration and seed when `prisma/schema.prisma` exists before starting the app. | Done |
-| Auth MFE builds with `VITE_AUTH_API_URL` | `chave-mfe-auth.build.args` includes `VITE_AUTH_API_URL` derived from the host-accessible API URL. | Done |
+| Auth MFE builds with `VITE_AUTH_API_URL` | `chave-mfe-auth.build.args` includes `VITE_AUTH_API_URL` derived from generated `AUTH_API_PUBLIC_URL`. | Done |
 | Shell builds with `MFE_AUTH_URL` | `chave-shell.build.args` includes `MFE_AUTH_URL` derived from the host-accessible remote entry URL. | Done |
-| Ministack included and minimally coupled | `ministack` service is present and only passed to backend as local endpoint variables. | Done |
+| Ministack gateway is default auth route | `make setup` provisions a Ministack API Gateway and writes `AUTH_API_PUBLIC_URL` to `.env.generated` before building the auth MFE. | Done |
 | Terraform provisions artifact bucket | `terraform/main.tf` defines `aws_s3_bucket.artifacts` and versioning. | Done |
-| Terraform provisions API Gateway proxy resources | `terraform/main.tf` defines `/auth` and `/auth/{proxy+}` proxy resources. | Done |
+| Terraform provisions API Gateway proxy resources | `terraform/main.tf` defines root proxy and `/auth` proxy resources. | Done |
 | Terraform remains minimal | Terraform config is limited to S3, API Gateway, and provider setup; no extra cloud complexity. | Done |
 | Makefile provides `setup` | `Makefile` target `setup` copies `.env` if needed, checks sibling Dockerfiles/lockfiles, and starts Compose with build. | Done |
 | Makefile provides `up`, `down`, `logs`, `reset`, `provision` | `Makefile` contains all required lifecycle targets. | Done |
@@ -64,14 +64,14 @@ Concrete success criteria:
 | README explains startup and stop/reset commands | `README.md` common commands section covers startup, stop, logs, reset, and provisioning. | Done |
 | README explains service URLs | `README.md` default URL table covers required services. | Done |
 | README explains alternate port usage | `README.md` documents changing `*_PORT` values and optional URL overrides. | Done |
-| README explains Ministack role and optional provisioning | `README.md` service wiring and optional provisioning sections cover this. | Done |
+| README explains Ministack role and gateway provisioning | `README.md` service wiring and Ministack provisioning sections cover this. | Done |
 | Verification target exists | `scripts/verify-stack.sh`, `make verify`, and `make verify-topology` exist. | Done |
 | Docker Compose builds backend, MFE, and shell images | `make setup` built all three application images successfully. | Done |
 | `make setup` starts local stack | `make setup` completed with the local `.env` using `DB_PORT=55432` because host port `5432` is already occupied on this machine. | Done |
 | PostgreSQL becomes healthy | `docker compose ps` and `make verify` confirmed PostgreSQL-backed services are running; Compose reported `chave-postgres` healthy. | Done |
 | Ministack becomes healthy | `docker compose ps` and `make verify` confirmed `chave-ministack` healthy and `/_localstack/health` reachable. | Done |
-| Backend health endpoint responds | `make verify` passed `http://localhost:3001/health`. | Done |
-| Swagger responds | `make verify` passed `http://localhost:3001/docs`. | Done |
+| Backend health endpoint responds | `make verify` passed health through the generated `AUTH_API_PUBLIC_URL`. | Done |
+| Swagger responds | `make verify` passed Swagger through the generated `AUTH_API_PUBLIC_URL`. | Done |
 | MFE remote entry responds | `make verify` passed `http://localhost:4001/assets/remoteEntry.js`. | Done |
 | Shell responds | `make verify` passed `http://localhost:3000`. | Done |
 

@@ -24,7 +24,7 @@ The repository must provide a one-command or near-one-command local environment 
 - auth microservice
 - auth microfrontend
 - shell frontend
-- optional Terraform provisioning against Ministack
+- Terraform provisioning against Ministack for the default local API Gateway route
 
 ## Docker Compose Requirements
 
@@ -35,7 +35,7 @@ The repository must provide a one-command or near-one-command local environment 
 - `chave-ms-auth`
 - `chave-mfe-auth`
 - `chave-shell`
-- optional `infra-provisioner` profile
+- `infra-provisioner` profile used by `make setup`
 
 The services must be wired with correct dependencies:
 
@@ -67,8 +67,8 @@ Default URLs:
 ```text
 Shell:     http://localhost:3000
 Auth MFE:  http://localhost:4001
-Auth API:  http://localhost:3001
-Swagger:   http://localhost:3001/docs
+Auth API:  generated in .env.generated through Ministack API Gateway
+Swagger:   ${AUTH_API_PUBLIC_URL}/docs
 Ministack: http://localhost:4566
 ```
 
@@ -91,7 +91,7 @@ The backend container must run migrations and seed data before starting the app.
 
 The Compose service for `chave-mfe-auth` must build with:
 
-- `VITE_AUTH_API_URL` pointing to the host-accessible auth API URL
+- `VITE_AUTH_API_URL` pointing to the generated Ministack API Gateway URL
 
 The Compose service for `chave-shell` must build with:
 
@@ -101,10 +101,17 @@ The Compose service for `chave-shell` must build with:
 
 Ministack must be included because the course architecture expects local AWS-like support.
 
-Currently, auth logic does not need deep AWS integration. Ministack should remain minimally coupled but available for:
+For P1, auth traffic uses Ministack as the local AWS-compatible API Gateway
+layer. The default browser-to-backend path is:
+
+```text
+Browser -> Shell -> Auth MFE -> Ministack API Gateway -> MS Auth -> PostgreSQL
+```
+
+Ministack also remains available for:
 
 - S3-style artifact/resource experiments
-- API Gateway-style future integration
+- API Gateway-style auth routing
 - Terraform provisioning demonstration
 
 ## Terraform Requirements
@@ -114,7 +121,7 @@ Terraform must remain practical and minimal.
 It should provision local AWS-compatible resources only where useful for P1, such as:
 
 - artifact bucket
-- API Gateway proxy resources for auth-style routing
+- API Gateway proxy resources for auth routing
 
 It must not introduce unnecessary cloud complexity.
 
@@ -128,9 +135,11 @@ The Makefile must provide:
 - `logs`
 - `reset`
 - `provision`
+- `configure-gateway`
 - Terraform helper targets where useful
 
-`setup` must copy or require `.env` and then start the stack with build.
+`setup` must copy or require `.env`, provision the Ministack API Gateway, write
+`.env.generated`, and then build the frontend with the generated gateway URL.
 
 ## Documentation Requirements
 
@@ -143,7 +152,8 @@ The infra README must explain:
 - service URLs
 - alternate port usage
 - role of Ministack
-- optional provisioning
+- generated API Gateway URL
+- provisioning flow used by `make setup`
 
 ## Acceptance Criteria
 
@@ -158,4 +168,3 @@ This repository is ready when:
 - MFE remote entry responds.
 - Shell responds.
 - Optional alternate port configuration works.
-
