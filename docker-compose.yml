@@ -1,16 +1,35 @@
 services:
-  ministack:
-    image: ministackorg/ministack
-    container_name: ministack
-    ports:
-      - "4566:4566"
+  postgres:
+    image: postgres:16-alpine
+    container_name: chave-postgres
     environment:
-      - SERVICES=s3,rds,apigateway,sts
-      - DEBUG=0
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      POSTGRES_DB: ${DB_NAME:-chave_auth}
+      POSTGRES_USER: ${DB_USER:-chave}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chave_secret}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  ministack:
+    image: ${MINISTACK_IMAGE:-ministackorg/ministack}
+    container_name: chave-ministack
+    ports:
+      - "${MINISTACK_PORT:-4566}:4566"
+    environment:
+      SERVICES: ${MINISTACK_SERVICES:-s3,apigateway,sts}
+      DEBUG: ${MINISTACK_DEBUG:-0}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - ministack_data:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
@@ -18,25 +37,9 @@ services:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4566/_localstack/health')\""]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
       start_period: 20s
-
-  infra-provisioner:
-    image: hashicorp/terraform:latest
-    container_name: infra-provisioner
-    working_dir: /infra
-    volumes:
-      - ./terraform:/infra
-    environment:
-      - TF_VAR_endpoint=http://ministack:4566
-      - TF_VAR_db_name=${DB_NAME:-chave_auth}
-      - TF_VAR_db_user=${DB_USER:-chave}
-      - TF_VAR_db_password=${DB_PASSWORD:-chave_secret}
-      - TF_VAR_ms_auth_port=${MS_AUTH_PORT:-3001}
-    entrypoint: ["/bin/sh", "-c", "rm -f terraform.tfstate terraform.tfstate.backup && terraform init && terraform apply -auto-approve"]
-    depends_on:
-      ministack:
-        condition: service_healthy
+    restart: unless-stopped
 
   chave-ms-auth:
     build:
@@ -46,39 +49,83 @@ services:
     ports:
       - "${MS_AUTH_PORT:-3001}:3001"
     environment:
-      - NODE_ENV=development
-      - PORT=3001
-      - JWT_SECRET=${JWT_SECRET}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - AWS_ENDPOINT=http://ministack:4566
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://${DB_USER:-chave}:${DB_PASSWORD:-chave_secret}@postgres:5432/${DB_NAME:-chave_auth}?schema=public
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-chave}
+      DB_PASSWORD: ${DB_PASSWORD:-chave_secret}
+      DB_NAME: ${DB_NAME:-chave_auth}
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret-change-me-32-chars}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      ACCESS_TOKEN_TTL: ${JWT_ACCESS_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${JWT_REFRESH_TTL:-7d}
+      PASSWORD_RESET_TOKEN_TTL: ${PASSWORD_RESET_TOKEN_TTL:-30m}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-chave_refresh_token}
+      REFRESH_COOKIE_PATH: ${REFRESH_COOKIE_PATH:-/auth/refresh}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      REFRESH_COOKIE_SAME_SITE: ${REFRESH_COOKIE_SAME_SITE:-lax}
+      REFRESH_COOKIE_MAX_AGE_SECONDS: ${REFRESH_COOKIE_MAX_AGE_SECONDS:-604800}
+      FRONTEND_CORS_ORIGINS: ${FRONTEND_CORS_ORIGINS:-http://localhost:${SHELL_PORT:-3000},http://localhost:${MFE_AUTH_PORT:-4001}}
+      FRONTEND_ORIGINS: ${FRONTEND_CORS_ORIGINS:-http://localhost:${SHELL_PORT:-3000},http://localhost:${MFE_AUTH_PORT:-4001}}
+      CORS_ORIGIN: ${FRONTEND_CORS_ORIGINS:-http://localhost:${SHELL_PORT:-3000},http://localhost:${MFE_AUTH_PORT:-4001}}
+      RESET_PASSWORD_FRONTEND_URL: ${RESET_PASSWORD_FRONTEND_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/reset-password}
+      FRONTEND_RESET_PASSWORD_URL: ${RESET_PASSWORD_FRONTEND_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/reset-password}
+      RESET_PASSWORD_URL: ${RESET_PASSWORD_FRONTEND_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/reset-password}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@chave.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin123!}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Admin Chave}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_ENDPOINT: http://ministack:4566
+      AWS_ENDPOINT_URL: http://ministack:4566
+      LOCALSTACK_ENDPOINT: http://ministack:4566
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        if [ -f prisma/schema.prisma ]; then
+          npx prisma migrate deploy
+          npx prisma db seed
+        fi
+        if node -e "const scripts = require('./package.json').scripts || {}; process.exit(scripts['start:prod'] ? 0 : 1)"; then
+          npm run start:prod
+        else
+          npm run start
+        fi
     depends_on:
-      infra-provisioner:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      ministack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const req=http.get('http://127.0.0.1:3001/health',res=>process.exit(res.statusCode>=200&&res.statusCode<400?0:1));req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
 
   chave-mfe-auth:
     build:
       context: ../chave-mfe-auth
       dockerfile: Dockerfile
+      args:
+        VITE_AUTH_API_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
+        VITE_MS_AUTH_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
     container_name: chave-mfe-auth
     ports:
       - "${MFE_AUTH_PORT:-4001}:4001"
     environment:
-      - VITE_MS_AUTH_URL=http://localhost:3001
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - AWS_ENDPOINT=http://ministack:4566
+      VITE_AUTH_API_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
+      VITE_MS_AUTH_URL: ${AUTH_API_PUBLIC_URL:-http://localhost:${MS_AUTH_PORT:-3001}}
     depends_on:
-      infra-provisioner:
-        condition: service_completed_successfully
+      chave-ms-auth:
+        condition: service_started
     restart: unless-stopped
 
   chave-shell:
@@ -86,21 +133,40 @@ services:
       context: ../chave-shell
       dockerfile: Dockerfile
       args:
-        - MFE_AUTH_URL=http://localhost:4001/assets/remoteEntry.js
+        MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
+        VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
     container_name: chave-shell
     ports:
       - "${SHELL_PORT:-3000}:3000"
     environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - AWS_ENDPOINT=http://ministack:4566
+      MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
+      VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
     depends_on:
-      infra-provisioner:
-        condition: service_completed_successfully
       chave-mfe-auth:
         condition: service_started
     restart: unless-stopped
 
+  infra-provisioner:
+    image: hashicorp/terraform:1.8
+    container_name: chave-infra-provisioner
+    profiles:
+      - provision
+      - infra-provisioner
+    working_dir: /infra
+    volumes:
+      - ./terraform:/infra
+    environment:
+      TF_VAR_endpoint: http://ministack:4566
+      TF_VAR_region: ${AWS_DEFAULT_REGION:-us-east-1}
+      TF_VAR_artifact_bucket: ${TF_VAR_ARTIFACT_BUCKET:-chave-artifacts-local}
+      TF_VAR_ms_auth_host: chave-ms-auth
+      TF_VAR_ms_auth_port: 3001
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["terraform init && terraform apply -auto-approve"]
+    depends_on:
+      ministack:
+        condition: service_healthy
+
 volumes:
+  postgres_data:
   ministack_data:

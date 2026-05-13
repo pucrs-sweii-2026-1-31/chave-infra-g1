@@ -1,142 +1,184 @@
 # chave-infra
 
-Repositório de infraestrutura local do projeto **Chave** — sistema de gestão de estoque de roupas.
+Local infrastructure and orchestration for the Chave P1 authentication stack.
 
-Orquestra os microsserviços, microfrontends e a stack AWS local (Ministack) via Docker Compose. O provisionamento dos recursos AWS é feito automaticamente via Terraform ao subir a stack.
+This repository starts the shared local services and the three application containers side by side:
 
----
+- `postgres`
+- `ministack`
+- `chave-ms-auth`
+- `chave-mfe-auth`
+- `chave-shell`
 
-## Pré-requisitos
+Terraform provisioning is available as an optional profile for local AWS-compatible resources.
+It is optional because the main local stack is fully orchestrated by Docker Compose: PostgreSQL,
+Ministack, the auth backend, the auth MFE, and the shell can run and communicate directly without
+Terraform. When the provisioning profile is not enabled, no other IaC tool replaces Terraform; the
+application uses Compose networking, exposed local ports, and environment variables instead.
+Terraform only creates extra local Ministack resources, such as the artifact bucket and API Gateway
+proxy routes, for demonstration and future AWS-like integrations.
 
-| Ferramenta | Versão mínima | Instalação |
-|---|---|---|
-| Docker | 24+ | https://docs.docker.com/get-docker/ |
+## Prerequisites
 
----
+- Docker 24+ with Docker Compose v2
+- `make`
+- `curl` for endpoint verification
 
-## Estrutura de repositórios
+The application repositories must be checked out next to this repository:
 
-Todos os repositórios devem estar dentro do mesmo diretório:
-
+```text
+project/
+├── chave-infra/
+├── chave-ms-auth/
+├── chave-mfe-auth/
+└── chave-shell/
 ```
-projeto/
-├── chave-infra/          ← este repositório
-│   ├── terraform/
-│   │   ├── main.tf
-│   │   └── variables.tf
-│   ├── docker-compose.yml
-│   ├── Makefile
-│   └── .env.example
-├── chave-ms-auth/        ← microsserviço
-├── chave-mfe-auth/       ← microfrontend
-└── chave-shell/          ← shell do frontend
-```
 
-### Clonando os repositórios irmãos
+## Environment Setup
+
+Create a local `.env` from the example:
 
 ```bash
-# A partir do diretório do projeto/
-git clone <url-chave-ms-auth>  chave-ms-auth
-git clone <url-chave-mfe-auth> chave-mfe-auth
-git clone <url-chave-shell>    chave-shell
-git clone <url-chave-infra>    chave-infra
-```
-
----
-
-## Configuração inicial
-
-```bash
-cd chave-infra
-
-# 1. Copie e edite as variáveis de ambiente
 cp .env.example .env
-# Edite .env conforme necessário (JWT_SECRET em especial)
+```
 
-# 2. Sobe toda a stack
+`make setup` also copies `.env.example` to `.env` when `.env` is missing.
+
+Important values:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `SHELL_PORT` | Host port for the shell app | `3000` |
+| `MS_AUTH_PORT` | Host port for the auth API | `3001` |
+| `MFE_AUTH_PORT` | Host port for the auth MFE | `4001` |
+| `DB_PORT` | Host port for PostgreSQL | `5432` |
+| `MINISTACK_PORT` | Host port for Ministack | `4566` |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL credentials | `chave_auth`, `chave`, `chave_secret` |
+| `JWT_SECRET` | Local JWT signing secret | `local-development-jwt-secret-change-me-32-chars` |
+| `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL`, `PASSWORD_RESET_TOKEN_TTL` | Access, refresh, and password-reset token lifetimes | `15m`, `7d`, `30m` |
+| `REFRESH_COOKIE_*` | Refresh-token cookie behavior | see `.env.example` |
+| `SEED_ADMIN_*` | Seed admin account used by the backend | see `.env.example` |
+| `AWS_*`, `MINISTACK_*` | Local AWS-compatible configuration | see `.env.example` |
+
+When using alternate host ports on localhost, changing the `*_PORT` variables is enough because Compose derives the browser-facing URLs from those ports:
+
+```env
+MS_AUTH_PORT=3101
+MFE_AUTH_PORT=4101
+SHELL_PORT=3100
+```
+
+If you use a non-`localhost` hostname or custom path, uncomment and adjust the browser-facing URL overrides in `.env`.
+
+## Startup
+
+Start the full local stack with build:
+
+```bash
 make setup
 ```
 
-O `make setup`:
-1. Inicializa os providers Terraform (`terraform init`)
-2. Sobe o Ministack e aguarda ele estar saudável
-3. Provisiona os recursos AWS via `terraform apply` (S3, RDS, API Gateway)
-4. Sobe todos os demais serviços
+Equivalent direct command:
 
-> O provisionamento também acontece automaticamente ao rodar `docker compose up` diretamente — o serviço `infra-provisioner` executa o Terraform antes de liberar os demais serviços.
+```bash
+docker compose up -d --build
+```
 
----
+Default URLs:
 
-## Comandos disponíveis
-
-| Comando | Descrição |
+| Service | URL |
 |---|---|
-| `make setup` | Setup completo: `terraform init` → Ministack → `terraform apply` → todos os serviços |
-| `make up` | Sobe todos os serviços (`docker compose up -d`) |
-| `make down` | Para e remove os containers |
-| `make logs` | Acompanha os logs em tempo real |
-| `make reset` | Derruba tudo (inclusive volumes) e refaz o setup do zero |
-| `make tf-init` | Inicializa os providers Terraform |
-| `make tf-apply` | Provisiona os recursos no Ministack via Terraform |
+| Shell | http://localhost:3000 |
+| Auth MFE | http://localhost:4001 |
+| Auth API | http://localhost:3001 |
+| Swagger | http://localhost:3001/docs |
+| PostgreSQL | `localhost:5432` |
+| Ministack | http://localhost:4566 |
 
----
+Service roles:
 
-## URLs e portas locais
+| Service | Role |
+|---|---|
+| Shell | Frontend host that loads and composes the microfrontends |
+| Auth MFE | Authentication UI exposed as a microfrontend |
+| Auth API | Backend authentication service and auth business rules |
+| Swagger | Interactive API documentation for the auth backend |
+| PostgreSQL | Local relational database used by the auth backend |
+| Ministack | Local AWS-compatible emulator for S3/API Gateway demos |
 
-| Serviço | URL local | Descrição |
-|---|---|---|
-| chave-shell | http://localhost:3000 | Shell App (microfrontend host) |
-| chave-ms-auth | http://localhost:3001 | Microsserviço de autenticação |
-| chave-mfe-auth | http://localhost:4001 | Microfrontend de autenticação |
-| Ministack | http://localhost:4566 | Emulador AWS |
-| API Gateway | `http://localhost:4566/restapis/<api-id>/v1/_user_request_` | Gateway para chave-ms-auth |
-| RDS (PostgreSQL) | `localhost:5432` | Banco provisionado pelo Ministack |
+## Common Commands
 
-> O ID do API Gateway é gerado dinamicamente pelo Terraform e exibido no output do `make setup`.
-> Para consultar depois: `awslocal apigateway get-rest-apis`
+| Command | Description |
+|---|---|
+| `make setup` | Copy `.env` if needed, check sibling app Dockerfiles/lockfiles, and start the full stack with image builds |
+| `make up` | Start or rebuild the stack |
+| `make down` | Stop and remove containers |
+| `make logs` | Follow all container logs |
+| `make reset` | Stop the stack, remove volumes, rebuild, and start again |
+| `make ps` | Show Compose service state |
+| `make config` | Render the resolved Compose configuration |
+| `make verify` | Check the expected local HTTP endpoints |
+| `make verify-topology` | Check Compose service/profile topology without requiring running endpoints |
+| `make provision` | Run optional Terraform provisioning against Ministack |
+| `make tf-init` | Run `terraform init` in the Terraform container |
+| `make tf-plan` | Run `terraform plan` in the Terraform container |
+| `make tf-apply` | Alias for `make provision` |
 
-### Rotas do API Gateway
+## Service Wiring
 
-| Método | Rota | Destino |
-|---|---|---|
-| POST | `/auth/login` | chave-ms-auth:3001 |
-| POST | `/auth/refresh` | chave-ms-auth:3001 |
-| POST | `/auth/logout` | chave-ms-auth:3001 |
-| GET | `/auth/me` | chave-ms-auth:3001 |
+`postgres` is the application database. The backend receives both `DATABASE_URL` and the legacy `DB_*` variables, with `DB_HOST=postgres` and internal port `5432`.
 
----
+`ministack` provides local AWS-compatible endpoints for P1 demos and future integrations. The backend receives internal endpoint variables pointing to `http://ministack:4566`.
 
-## Como adicionar um novo microsserviço
+`chave-ms-auth` waits for healthy PostgreSQL and Ministack services. On startup it runs Prisma migrations and seed data when a `prisma/schema.prisma` file exists, then starts the backend.
 
-1. **Crie o repositório** no mesmo nível dos demais (ex: `chave-ms-inventory/`).
+`chave-mfe-auth` builds with `VITE_AUTH_API_URL` and `VITE_MS_AUTH_URL` pointing to the host-accessible auth API URL.
 
-2. **Adicione o serviço ao `docker-compose.yml`**, dependendo do `infra-provisioner`:
+`chave-shell` builds with the auth MFE remote entry URL.
 
-```yaml
-chave-ms-inventory:
-  build:
-    context: ../chave-ms-inventory
-    dockerfile: Dockerfile
-  container_name: chave-ms-inventory
-  ports:
-    - "${MS_INVENTORY_PORT:-3002}:3002"
-  environment:
-    - AWS_ENDPOINT=http://ministack:4566
-    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-  depends_on:
-    infra-provisioner:
-      condition: service_completed_successfully
-  restart: unless-stopped
+## Optional Ministack Provisioning
+
+Terraform is intentionally minimal. It provisions:
+
+- an S3-style artifact bucket
+- an API Gateway REST API with `/auth` and `/auth/{proxy+}` proxy routes to the auth service
+
+Run it after the stack is available:
+
+```bash
+make provision
 ```
 
-3. **Adicione a porta ao `.env.example`** (e ao seu `.env`):
+The Terraform image runs inside Docker Compose, so a local Terraform binary is not required.
 
-```env
-MS_INVENTORY_PORT=3002
+## Verification
+
+After `make setup`, verify the required endpoints:
+
+```bash
+make verify
 ```
 
-4. **Se precisar de rotas no API Gateway ou outros recursos AWS**, adicione os recursos correspondentes em `terraform/main.tf` seguindo os padrões já existentes para S3, RDS e API Gateway.
+The checks cover:
 
-5. Rode `make reset` para recriar a stack com as novas configurações.
+- backend health: `http://localhost:3001/health`
+- Swagger: `http://localhost:3001/docs`
+- auth MFE remote entry: `http://localhost:4001/assets/remoteEntry.js`
+- shell: `http://localhost:3000`
+- Ministack health: `http://localhost:4566/_localstack/health`
+
+To validate only the Compose service and profile definitions, run:
+
+```bash
+make verify-topology
+```
+
+The current prompt-to-artifact status is tracked in [docs/completion-audit.md](docs/completion-audit.md).
+
+If a machine already uses one of the default ports, change the matching `*_PORT` values in `.env`, adjust any enabled URL overrides, then run `make reset`.
+
+For a one-off run without editing `.env`, pass overrides as make variables:
+
+```bash
+make DB_PORT=55432 setup
+```
