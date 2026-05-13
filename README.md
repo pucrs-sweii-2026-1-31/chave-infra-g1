@@ -11,6 +11,12 @@ This repository starts the shared local services and the three application conta
 - `chave-shell`
 
 Terraform provisioning is available as an optional profile for local AWS-compatible resources.
+It is optional because the main local stack is fully orchestrated by Docker Compose: PostgreSQL,
+Ministack, the auth backend, the auth MFE, and the shell can run and communicate directly without
+Terraform. When the provisioning profile is not enabled, no other IaC tool replaces Terraform; the
+application uses Compose networking, exposed local ports, and environment variables instead.
+Terraform only creates extra local Ministack resources, such as the artifact bucket and API Gateway
+proxy routes, for demonstration and future AWS-like integrations.
 
 ## Prerequisites
 
@@ -88,6 +94,17 @@ Default URLs:
 | Swagger | http://localhost:3001/docs |
 | PostgreSQL | `localhost:5432` |
 | Ministack | http://localhost:4566 |
+
+Service roles:
+
+| Service | Role |
+|---|---|
+| Shell | Frontend host that loads and composes the microfrontends |
+| Auth MFE | Authentication UI exposed as a microfrontend |
+| Auth API | Backend authentication service and auth business rules |
+| Swagger | Interactive API documentation for the auth backend |
+| PostgreSQL | Local relational database used by the auth backend |
+| Ministack | Local AWS-compatible emulator for S3/API Gateway demos |
 
 ## Common Commands
 
