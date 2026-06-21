@@ -107,6 +107,63 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # ─── Assessment Service (Grupo 1 — T2) ───────────────────────────────────────
+  assessment-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_ASSESSMENT_NAME:-chave_assessment}
+      POSTGRES_USER: ${DB_USER:-chave}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chave_secret}
+    volumes:
+      - assessment_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  ms-assessment-service:
+    build:
+      context: ../ms-assessment-service
+      dockerfile: Dockerfile
+    ports:
+      - "${MS_ASSESSMENT_PORT:-3002}:3002"
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret-change-me-32-chars}
+      ADMIN_ROLE: ${ADMIN_ROLE:-admin}
+      DB_HOST: assessment-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-chave}
+      DB_PASSWORD: ${DB_PASSWORD:-chave_secret}
+      DB_NAME: ${DB_ASSESSMENT_NAME:-chave_assessment}
+      GROUP_SERVICE_URL: ${GROUP_SERVICE_URL:-}
+      AWS_ENDPOINT: http://ministack:4566
+    depends_on:
+      assessment-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const req=http.get('http://127.0.0.1:3002/health',res=>process.exit(res.statusCode>=200&&res.statusCode<400?0:1));req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  mfe-assessment-service:
+    build:
+      context: ../mfe-assessment-service
+      dockerfile: Dockerfile
+    ports:
+      - "${MFE_ASSESSMENT_PORT:-4002}:4002"
+    depends_on:
+      ms-assessment-service:
+        condition: service_started
+    restart: unless-stopped
+
   chave-mfe-auth:
     build:
       context: ../chave-mfe-auth-g1
@@ -131,15 +188,21 @@ services:
       args:
         MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
         VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
+        MFE_ASSESSMENT_URL: ${MFE_ASSESSMENT_PUBLIC_REMOTE_URL:-http://localhost:${MFE_ASSESSMENT_PORT:-4002}/assets/remoteEntry.js}
+        VITE_MFE_ASSESSMENT_URL: ${MFE_ASSESSMENT_PUBLIC_REMOTE_URL:-http://localhost:${MFE_ASSESSMENT_PORT:-4002}/assets/remoteEntry.js}
     ports:
       - "${SHELL_PORT:-3000}:3000"
     environment:
       MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
       VITE_MFE_AUTH_URL: ${MFE_AUTH_PUBLIC_REMOTE_URL:-http://localhost:${MFE_AUTH_PORT:-4001}/assets/remoteEntry.js}
+      MFE_ASSESSMENT_URL: ${MFE_ASSESSMENT_PUBLIC_REMOTE_URL:-http://localhost:${MFE_ASSESSMENT_PORT:-4002}/assets/remoteEntry.js}
+      VITE_MFE_ASSESSMENT_URL: ${MFE_ASSESSMENT_PUBLIC_REMOTE_URL:-http://localhost:${MFE_ASSESSMENT_PORT:-4002}/assets/remoteEntry.js}
       AUTH_API_PROXY_URL: ${AUTH_API_INTERNAL_URL:-http://chave-ms-auth:3001}
       NGINX_ENVSUBST_FILTER: AUTH_API_PROXY_URL
     depends_on:
       chave-mfe-auth:
+        condition: service_started
+      mfe-assessment-service:
         condition: service_started
     restart: unless-stopped
 
@@ -167,3 +230,4 @@ services:
 volumes:
   postgres_data:
   ministack_data:
+  assessment_db_data:
